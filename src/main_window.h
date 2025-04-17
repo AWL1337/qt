@@ -36,10 +36,10 @@ protected:
 
     private slots:
         void addField();
-    void removeSelectedField();
-    void sendRequest();
-    void onReplyFinished(QNetworkReply *reply);
-    void updateFieldParams(int row);
+        void removeSelectedField();
+        void sendRequest();
+        void onReplyFinished(QNetworkReply *reply);
+        void updateFieldParams(int row);
 
 private:
     QLineEdit *tableNameEdit;
