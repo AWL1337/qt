@@ -10,7 +10,13 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 COMPONENTS Core Gui Widgets Network Test REQUIRED)
 
-add_executable(qt_client src/main.cpp src/main_window.cpp src/main_window.h)
+add_executable(qt_client
+        src/main.cpp
+        src/main_window.cpp
+        src/main_window.h
+        src/network_worker.cpp
+        src/network_worker.h
+)
 target_link_libraries(qt_client PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
 
 add_executable(qt_client_test tests/main_window_test.cpp src/main_window.cpp src/main_window.h)

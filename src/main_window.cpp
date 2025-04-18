@@ -5,19 +5,32 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QNetworkReply>
 #include <QComboBox>
 #include <QSpinBox>
 #include <QLineEdit>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), networkManager(new QNetworkAccessManager(this)), currentReply(nullptr) {
+    : QMainWindow(parent), networkThread(new QThread(this)), worker(new NetworkWorker()), requestSuccessful(false) {
+    worker->moveToThread(networkThread);
+    connect(networkThread, &QThread::finished, worker, &QObject::deleteLater);
+    connect(this, &MainWindow::destroyed, networkThread, &QThread::quit);
+    connect(this, &MainWindow::sendNetworkRequest, worker, &NetworkWorker::processRequest);
+    connect(this, &MainWindow::cancelNetworkRequest, worker, &NetworkWorker::cancelRequest);
+    connect(worker, &NetworkWorker::dataReceived, this, &MainWindow::onDataReceived);
+    connect(worker, &NetworkWorker::finished, this, &MainWindow::onRequestFinished);
+    connect(worker, &NetworkWorker::errorOccurred, this, &MainWindow::onErrorOccurred);
+    networkThread->start();
+
     setupUi();
     connect(addFieldButton, &QPushButton::clicked, this, &MainWindow::addField);
     connect(removeFieldButton, &QPushButton::clicked, this, &MainWindow::removeSelectedField);
     connect(sendButton, &QPushButton::clicked, this, &MainWindow::sendRequest);
     connect(cancelButton, &QPushButton::clicked, this, &MainWindow::cancelRequest);
-    connect(networkManager, &QNetworkAccessManager::finished, this, &MainWindow::onReplyFinished);
+}
+
+MainWindow::~MainWindow() {
+    networkThread->quit();
+    networkThread->wait();
 }
 
 void MainWindow::setupUi() {
@@ -64,7 +77,7 @@ void MainWindow::setupUi() {
     sendButton->setObjectName("sendButton");
     cancelButton = new QPushButton("Cancel Request", this);
     cancelButton->setObjectName("cancelButton");
-    cancelButton->setVisible(false); // Изначально скрыта
+    cancelButton->setVisible(false);
     buttonLayout->addWidget(addFieldButton);
     buttonLayout->addWidget(removeFieldButton);
     buttonLayout->addWidget(sendButton);
@@ -223,7 +236,9 @@ void MainWindow::sendRequest() {
     QNetworkRequest request(QUrl("http://localhost:8080/generate"));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
-    currentReply = networkManager->post(request, jsonData);
+    responseData.clear();
+    requestSuccessful = false; // Сбрасываем флаг успеха
+    emit sendNetworkRequest(request, jsonData);
 
     sendButton->setText("Processing...");
     sendButton->setEnabled(false);
@@ -231,65 +246,54 @@ void MainWindow::sendRequest() {
 }
 
 void MainWindow::cancelRequest() {
-    if (currentReply) {
-        currentReply->abort();
-        currentReply = nullptr;
-        sendButton->setText("Send Request");
-        sendButton->setEnabled(true);
-        cancelButton->setVisible(false);
-        showInformation("Cancelled", "Request has been cancelled.");
-    }
-}
-
-void MainWindow::onReplyFinished(QNetworkReply *reply) {
+    emit cancelNetworkRequest();
     sendButton->setText("Send Request");
     sendButton->setEnabled(true);
     cancelButton->setVisible(false);
-    currentReply = nullptr;
+    requestSuccessful = false; // Запрос неуспешен
+    responseData.clear();
+    showInformation("Cancelled", "Request has been cancelled.");
+}
 
-    if (reply->error() == QNetworkReply::OperationCanceledError) {
-        reply->deleteLater();
-        return;
-    }
+void MainWindow::onDataReceived(const QByteArray &data) {
+    responseData.append(data);
+    requestSuccessful = true; // Помечаем запрос как успешный при получении данных
+}
 
-    if (reply->error() != QNetworkReply::NoError) {
-        showCritical("Network Error", QString("Network error: %1").arg(reply->errorString()));
-        reply->deleteLater();
-        return;
-    }
+void MainWindow::onRequestFinished() {
+    sendButton->setText("Send Request");
+    sendButton->setEnabled(true);
+    cancelButton->setVisible(false);
 
-    int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if (statusCode != 200) {
-        QString errorMessage = "Unknown server error";
-        QByteArray responseData = reply->readAll();
-        QJsonDocument jsonDoc = QJsonDocument::fromJson(responseData);
-        if (!jsonDoc.isNull() && jsonDoc.isObject()) {
-            QJsonObject jsonObj = jsonDoc.object();
-            if (jsonObj.contains("error")) {
-                errorMessage = jsonObj["error"].toString();
-            }
-        } else {
-            errorMessage = QString("Invalid response: %1").arg(QString(responseData));
-        }
-        showCritical("Server Error", QString("HTTP %1: %2").arg(statusCode).arg(errorMessage));
-        reply->deleteLater();
+    if (!requestSuccessful || responseData.isEmpty()) {
+        // Не показываем QFileDialog при ошибке или отмене
+        responseData.clear();
         return;
     }
 
     QString fileName = getSaveFileName("Save CSV File", outputFileEdit->text(), "CSV Files (*.csv)");
     if (fileName.isEmpty()) {
-        reply->deleteLater();
+        responseData.clear();
         return;
     }
 
     QFile file(fileName);
     if (file.open(QIODevice::WriteOnly)) {
-        file.write(reply->readAll());
+        file.write(responseData);
         file.close();
         showInformation("Success", "CSV file saved successfully!");
     } else {
         showCritical("File Error", "Failed to save CSV file: " + file.errorString());
     }
 
-    reply->deleteLater();
+    responseData.clear();
+}
+
+void MainWindow::onErrorOccurred(const QString &error) {
+    sendButton->setText("Send Request");
+    sendButton->setEnabled(true);
+    cancelButton->setVisible(false);
+    requestSuccessful = false; // Запрос неуспешен
+    showCritical("Network Error", error);
+    responseData.clear();
 }
