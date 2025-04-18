@@ -11,11 +11,12 @@
 #include <QLineEdit>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), networkManager(new QNetworkAccessManager(this)) {
+    : QMainWindow(parent), networkManager(new QNetworkAccessManager(this)), currentReply(nullptr) {
     setupUi();
     connect(addFieldButton, &QPushButton::clicked, this, &MainWindow::addField);
     connect(removeFieldButton, &QPushButton::clicked, this, &MainWindow::removeSelectedField);
     connect(sendButton, &QPushButton::clicked, this, &MainWindow::sendRequest);
+    connect(cancelButton, &QPushButton::clicked, this, &MainWindow::cancelRequest);
     connect(networkManager, &QNetworkAccessManager::finished, this, &MainWindow::onReplyFinished);
 }
 
@@ -61,9 +62,13 @@ void MainWindow::setupUi() {
     removeFieldButton->setObjectName("removeFieldButton");
     sendButton = new QPushButton("Send Request", this);
     sendButton->setObjectName("sendButton");
+    cancelButton = new QPushButton("Cancel Request", this);
+    cancelButton->setObjectName("cancelButton");
+    cancelButton->setVisible(false); // Изначально скрыта
     buttonLayout->addWidget(addFieldButton);
     buttonLayout->addWidget(removeFieldButton);
     buttonLayout->addWidget(sendButton);
+    buttonLayout->addWidget(cancelButton);
     mainLayout->addLayout(buttonLayout);
 
     resize(600, 400);
@@ -218,10 +223,35 @@ void MainWindow::sendRequest() {
     QNetworkRequest request(QUrl("http://localhost:8080/generate"));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
-    networkManager->post(request, jsonData);
+    currentReply = networkManager->post(request, jsonData);
+
+    sendButton->setText("Processing...");
+    sendButton->setEnabled(false);
+    cancelButton->setVisible(true);
+}
+
+void MainWindow::cancelRequest() {
+    if (currentReply) {
+        currentReply->abort();
+        currentReply = nullptr;
+        sendButton->setText("Send Request");
+        sendButton->setEnabled(true);
+        cancelButton->setVisible(false);
+        showInformation("Cancelled", "Request has been cancelled.");
+    }
 }
 
 void MainWindow::onReplyFinished(QNetworkReply *reply) {
+    sendButton->setText("Send Request");
+    sendButton->setEnabled(true);
+    cancelButton->setVisible(false);
+    currentReply = nullptr;
+
+    if (reply->error() == QNetworkReply::OperationCanceledError) {
+        reply->deleteLater();
+        return;
+    }
+
     if (reply->error() != QNetworkReply::NoError) {
         showCritical("Network Error", QString("Network error: %1").arg(reply->errorString()));
         reply->deleteLater();

@@ -38,6 +38,7 @@ protected:
         void addField();
         void removeSelectedField();
         void sendRequest();
+        void cancelRequest();
         void onReplyFinished(QNetworkReply *reply);
         void updateFieldParams(int row);
 
@@ -49,7 +50,9 @@ private:
     QPushButton *addFieldButton;
     QPushButton *removeFieldButton;
     QPushButton *sendButton;
+    QPushButton *cancelButton;
     QNetworkAccessManager *networkManager;
+    QNetworkReply *currentReply;
 
     void setupUi();
     QWidget* createParamsWidget(const QString& type, int row);
